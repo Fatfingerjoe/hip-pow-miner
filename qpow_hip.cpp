@@ -38,31 +38,37 @@ __device__ __forceinline__ u64 gf_add(u64 a, u64 b){ return gf_red((__uint128_t)
 // 64x64 -> 128 multiply via inline GCN v_mad_u64_u32.
 // Decompose a = a1<<32 + a0, b = b1<<32 + b0.
 __device__ __forceinline__ u64 gf_mul(u64 a, u64 b){
-    u32 a0=(u32)a, a1=(u32)(a>>32);
-    u32 b0=(u32)b, b1=(u32)(b>>32);
+    unsigned a0 = (unsigned)a;
+    unsigned a1 = (unsigned)(a >> 32);
+    unsigned b0 = (unsigned)b;
+    unsigned b1 = (unsigned)(b >> 32);
 
-    // a0*b0  = p0lo:p0hi
-    u64 p0lo, p0hi;
-    asm volatile("v_mad_u64_u32 %0, %1, %2, %3, 0" : "=v"(p0lo), "=v"(p0hi) : "v"(a0), "v"(b0));
+    // p0 = a0*b0  = p0lo:p0hi
+    unsigned long long p0lo, p0hi;
+    asm volatile("v_mad_u64_u32 %0, %1, %2, %3, 0"
+        : "=v"(p0lo), "=v"(p0hi)
+        : "v"(a0), "v"(b0));
 
-    // cross0 = a0*b1 + p0hi  = c0lo:c0hi
-    u64 c0lo, c0hi;
-    asm volatile("v_mad_u64_u32 %0, %1, %2, %3, %4" : "=v"(c0lo), "=v"(c0hi) : "v"(a0), "v"(b1), "v"(p0hi));
+    // cross0 = a0*b1 + p0hi
+    unsigned long long c0lo, c0hi;
+    asm volatile("v_mad_u64_u32 %0, %1, %2, %3, %4"
+        : "=v"(c0lo), "=v"(c0hi)
+        : "v"(a0), "v"(b1), "v"(p0hi));
 
-    // cross1 = a1*b0 + c0lo  = c1lo:c1hi
-    u64 c1lo, c1hi;
-    asm volatile("v_mad_u64_u32 %0, %1, %2, %3, %4" : "=v"(c1lo), "=v"(c1hi) : "v"(a1), "v"(b0), "v"(c0lo));
+    // cross1 = a1*b0 + c0lo
+    unsigned long long c1lo, c1hi;
+    asm volatile("v_mad_u64_u32 %0, %1, %2, %3, %4"
+        : "=v"(c1lo), "=v"(c1hi)
+        : "v"(a1), "v"(b0), "v"(c0lo));
 
-    // high = a1*b1 + c0hi + c1hi
-    u64 hcarry = c0hi + c1hi;
-    u64 hlo, hhi;
-    asm volatile("v_mad_u64_u32 %0, %1, %2, %3, %4" : "=v"(hlo), "=v"(hhi) : "v"(a1), "v"(b1), "v"(hcarry));
+    // high = a1*b1 + (c0hi + c1hi)
+    unsigned long long hcarry = c0hi + c1hi;
+    unsigned long long hlo, hhi;
+    asm volatile("v_mad_u64_u32 %0, %1, %2, %3, %4"
+        : "=v"(hlo), "=v"(hhi)
+        : "v"(a1), "v"(b1), "v"(hcarry));
 
-    // Reconstruct 128-bit product:
-    // bits[0..31]  = p0lo
-    // bits[32..63] = c1lo
-    // bits[64..95] = hlo
-    // bits[96..127]= hhi
+    // Reconstruct 128-bit product.
     __uint128_t prod = (__uint128_t)p0lo
                      + ((__uint128_t)c1lo << 32)
                      + ((__uint128_t)hlo  << 64)
