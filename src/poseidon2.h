@@ -30,47 +30,45 @@ static __device__ __forceinline__ void external_linear(u64 *s, const u64 *rc) {
         s[i] = z;
     }
 }
-static __device__ __forceinline__ void internal_linear(u64 *s, u64 rc0, const u64 *rcrow) {
+static __device__ __forceinline__ void internal_linear(u64 *s) {
     u64 sum = s[0];
     #pragma unroll
     for (int i=1;i<12;i++) sum = gf_addL(sum, s[i]);
     #pragma unroll
     for (int i=0;i<12;i++) {
-        u64 S = (i==0) ? gf_addL(sum, rc0) : sum;
         u64 lo, hi;
         mul128(s[i], MAT_DIAG[i], lo, hi);
-        u64 t = lo + S;
+        u64 t = lo + sum;
         if (t < lo) hi += 1;
-        lo = t;
-        if (rcrow) {
-            u64 tt = lo + rcrow[i];
-            if (tt < lo) hi += 1;
-            lo = tt;
-        }
         s[i] = gf_reduce128(lo, hi);
     }
 }
 static __device__ __forceinline__ void permute(u64 *s) {
-    external_linear(s, INIT_EXT_RC[0]);
+    // Initial external linear layer (no round constants)
+    external_linear(s, nullptr);
+    // 4 initial external rounds: add RC -> S-box -> linear layer
     #pragma unroll
     for (int r=0;r<4;r++) {
         #pragma unroll
+        for (int i=0;i<12;i++) s[i] = gf_addL(s[i], INIT_EXT_RC[r][i]);
+        #pragma unroll
         for (int i=0;i<12;i++) s[i] = gf_exp7(s[i]);
-        if (r<3) external_linear(s, INIT_EXT_RC[r+1]);
-        else { external_linear(s, nullptr); s[0] = gf_addL(s[0], INTERNAL_RC[0]); }
+        external_linear(s, nullptr);
     }
+    // 22 internal rounds: add RC to s[0] -> S-box on s[0] -> internal linear layer
     #pragma unroll
     for (int r=0;r<22;r++) {
+        s[0] = gf_addL(s[0], INTERNAL_RC[r]);
         s[0] = gf_exp7(s[0]);
-        u64 rc0 = (r<21) ? INTERNAL_RC[r+1] : 0;
-        const u64 *rcrow = (r<21) ? nullptr : TERM_EXT_RC[0];
-        internal_linear(s, rc0, rcrow);
+        internal_linear(s);
     }
+    // 4 terminal external rounds: add RC -> S-box -> linear layer
     #pragma unroll
     for (int r=0;r<4;r++) {
         #pragma unroll
+        for (int i=0;i<12;i++) s[i] = gf_addL(s[i], TERM_EXT_RC[r][i]);
+        #pragma unroll
         for (int i=0;i<12;i++) s[i] = gf_exp7(s[i]);
-        const u64 *rc = (r<3) ? TERM_EXT_RC[r+1] : nullptr;
-        external_linear(s, rc);
+        external_linear(s, nullptr);
     }
 }
