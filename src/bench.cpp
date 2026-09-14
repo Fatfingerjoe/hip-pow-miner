@@ -14,6 +14,12 @@ __global__ void perm0_kernel(const u64 *in, u64 *out) {
     for (int i=0;i<12;i++) out[i]=gf_canon(s[i]);
 }
 
+__global__ void sbox_kernel(u64 *out) {
+    if (threadIdx.x || blockIdx.x) return;
+    u64 inputs[5] = {0,1,2,5,0xFFFFFFFFULL};
+    for (int i=0;i<5;i++) out[i]=gf_exp7(inputs[i]);
+}
+
 __global__ void midstate_kernel(const uint8_t *header, const uint8_t *nonce_high, u64 *out_ms) {
     if (threadIdx.x || blockIdx.x) return;
     compute_midstate(header, nonce_high, out_ms);
@@ -67,6 +73,19 @@ static void hex2bytes(const char *hex, uint8_t *out, int n) {
 
 int main(int argc, char **argv) {
     const char *mode = argc>1 ? argv[1] : "bench";
+    if (strcmp(mode, "sbox")==0) {
+        u64 *d_o, got[5];
+        hipMalloc(&d_o,5*sizeof(u64));
+        sbox_kernel<<<1,1>>>(d_o);
+        hipDeviceSynchronize();
+        hipMemcpy(got,d_o,5*sizeof(u64),hipMemcpyDeviceToHost);
+        u64 want[5]={0,1,128,78125,0xFFFFFFFFULL};
+        int fail=0;
+        for(int i=0;i<5;i++) if(got[i]!=want[i]){ fail++; printf("sbox[%d] want %016lx got %016lx\n",i,want[i],got[i]); }
+        printf("SBOX: %d mismatches\n",fail);
+        return fail?1:0;
+    }
+
     if (strcmp(mode, "perm0")==0) {
         u64 zero[12]={0};
         u64 *d_z,*d_o, got[12];
