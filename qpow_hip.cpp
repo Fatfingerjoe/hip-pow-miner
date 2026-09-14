@@ -440,7 +440,7 @@ int main(int argc,char**argv){
             printf("%s: %u/%u match (%u wrong)%c", mode, n-bad, n, bad, 10);
             return bad?1:0;
         }
-        double secs=argc>2?atof(argv[2]):8.0; u32 pt=argc>3?(u32)atoi(argv[3]):32; int tpb=argc>4?atoi(argv[4]):512;
+        double secs=argc>2?atof(argv[2]):8.0; u32 pt=argc>3?(u32)atoi(argv[3]):32; int tpb=argc>4?atoi(argv[4]):1024;
         unsigned char tg[32]; memset(tg,0,32); tg[0]=0x00; tg[1]=0x00; tg[2]=0x01;
         HC(hipMemcpy(dtg,tg,32,hipMemcpyHostToDevice));
         FoundR* dres; HC(hipMalloc(&dres,sizeof(FoundR))); HC(hipMemset(dres,0,sizeof(FoundR)));
@@ -458,7 +458,7 @@ int main(int argc,char**argv){
     }
     if(!strcmp(mode,"pool")){
         if(argc<5){ printf("usage: %s pool <url> <payout> <worker> [per_thread] [tpb]%c",argv[0],10); return 1; }
-        u32 pt = argc>5?(u32)atoi(argv[5]):32; int tpb = argc>6?atoi(argv[6]):512;
+        u32 pt = argc>5?(u32)atoi(argv[5]):32; int tpb = argc>6?atoi(argv[6]):1024;
         return run_pool(argv[2],argv[3],argv[4],pt,tpb);
     }
     if(!strcmp(mode,"version")){
