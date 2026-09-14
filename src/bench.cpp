@@ -59,6 +59,47 @@ static void hex2bytes(const char *hex, uint8_t *out, int n) {
 
 int main(int argc, char **argv) {
     const char *mode = argc>1 ? argv[1] : "bench";
+    if (strcmp(mode, "mid")==0) {
+        struct Kat { const char *h, *n, *mid; };
+        Kat kats[] = {
+            {"0000000000000000000000000000000000000000000000000000000000000000",
+             "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+             "8646d336b5a0fccd818ca5954891634549475e8bc9c928bcc469163bcdc4900be4421fafacd59087633f49b998698d664a9067e3883e76da193039e85ea14472203d2d3ee6a8eba8ef5b9ce39bcff072c16a3c8dd5680003d77c52ab5bf7cf1f"},
+            {"0101010101010101010101010101010101010101010101010101010101010101",
+             "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001",
+             "788cf743676a5c85dce1d727e1189b5336e0e019f5a0bf3a806487dd9c3bf83fcb6d7300de1ab5fe7dbe191fa64fc6b795dedc7fe99861beb1a3885303f7467d891eb002a34a0f174be4cf057a87208ae9113e7dc541745ffaeda908097d00f1"},
+            {"000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+             "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001234567890abcdef",
+             "f6fc848ab2dddc18fd88d1f0ccda99fe27cfa43b8ab9947a6a505b37f02183d35f98f1d3524fb0c6d6de4efd98793e2ef3f205bd1e4d4526c0c9046201e91dd6cd2d28eef32b18dea303ecbc8e98000c3db245e7738f3acabc55f7553023863e"},
+        };
+        uint8_t *d_h,*d_n; u64 *d_ms, ms[12];
+        hipMalloc(&d_h,32); hipMalloc(&d_n,32); hipMalloc(&d_ms,12*sizeof(u64));
+        int total=0,fail=0;
+        for (int ki=0; ki<(int)(sizeof(kats)/sizeof(kats[0])); ki++) {
+            const Kat &k = kats[ki];
+            uint8_t hb[32],nb[32],want[96];
+            hex2bytes(k.h,hb,32); hex2bytes(k.n,nb,32); hex2bytes(k.mid,want,96);
+            hipMemcpy(d_h,hb,32,hipMemcpyHostToDevice);
+            hipMemcpy(d_n,nb,32,hipMemcpyHostToDevice);
+            midstate_kernel<<<1,1>>>(d_h, d_n, d_ms);
+            hipDeviceSynchronize();
+            hipMemcpy(ms,d_ms,12*sizeof(u64),hipMemcpyDeviceToHost);
+            total++;
+            if (memcmp(ms,want,96)!=0) {
+                fail++;
+                printf("MID MISMATCH KAT #%d
+  want ",total);
+                for(int i=0;i<96;i++) printf("%02x",want[i]); printf("
+  got  ");
+                for(int i=0;i<96;i++) printf("%02x",((uint8_t*)ms)[i]); printf("
+");
+            }
+        }
+        printf("MID: %d/%d passed (%d failed)
+", total-fail, total, fail);
+        return fail?1:0;
+    }
+
     if (strcmp(mode, "verify")==0) {
         struct Kat { const char *h, *n, *hash, *mid; };
         Kat kats[] = {
