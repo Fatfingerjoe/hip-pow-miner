@@ -35,28 +35,38 @@ __device__ __forceinline__ u64 gf_red(__uint128_t x){
     return r;
 }
 __device__ __forceinline__ u64 gf_add(u64 a, u64 b){ return gf_red((__uint128_t)a + (__uint128_t)b); }
-// 64x64 -> 128 multiply using inline GCN v_mad_u64_u32.
+// 64x64 -> 128 multiply via inline GCN v_mad_u64_u32.
 // Decompose a = a1<<32 + a0, b = b1<<32 + b0.
-// Compute a*b = a1*b1<<64 + (a1*b0 + a0*b1)<<32 + a0*b0.
 __device__ __forceinline__ u64 gf_mul(u64 a, u64 b){
     u32 a0=(u32)a, a1=(u32)(a>>32);
     u32 b0=(u32)b, b1=(u32)(b>>32);
-    // p0 = a0*b0  = (p0lo:p0hi)
+
+    // a0*b0  = p0lo:p0hi
     u64 p0lo, p0hi;
     asm volatile("v_mad_u64_u32 %0, %1, %2, %3, 0" : "=v"(p0lo), "=v"(p0hi) : "v"(a0), "v"(b0));
-    // p1 = a0*b1 + p0hi  = (p1lo:p1hi)
-    u64 p1lo, p1hi;
-    asm volatile("v_mad_u64_u32 %0, %1, %2, %3, %4" : "=v"(p1lo), "=v"(p1hi) : "v"(a0), "v"(b1), "v"(p0hi));
-    // p2 = a1*b0 + p1lo  = (p2lo:p2hi); final low 32 bits of product are p0lo; mid word p2lo
-    u64 p2lo, p2hi;
-    asm volatile("v_mad_u64_u32 %0, %1, %2, %3, %4" : "=v"(p2lo), "=v"(p2hi) : "v"(a1), "v"(b0), "v"(p1lo));
-    // high word = a1*b1 + p1hi + p2hi (p1hi and p2hi are carries <= 2 each, small)
-    // We accumulate in u64; max high = ~2^64 + small, fits in u64.
-    u64 h = p1hi + p2hi;
-    u64 p3lo, p3hi;
-    asm volatile("v_mad_u64_u32 %0, %1, %2, %3, %4" : "=v"(p3lo), "=v"(p3hi) : "v"(a1), "v"(b1), "v"(h));
-    // Combine 128-bit result from p0lo (low 32), p2lo (next 32), p3lo (upper 32 of high), p3hi (carry)
-    __uint128_t prod = (__uint128_t)p0lo + ((__uint128_t)p2lo << 32) + ((__uint128_t)p3lo << 64) + ((__uint128_t)p3hi << 96);
+
+    // cross0 = a0*b1 + p0hi  = c0lo:c0hi
+    u64 c0lo, c0hi;
+    asm volatile("v_mad_u64_u32 %0, %1, %2, %3, %4" : "=v"(c0lo), "=v"(c0hi) : "v"(a0), "v"(b1), "v"(p0hi));
+
+    // cross1 = a1*b0 + c0lo  = c1lo:c1hi
+    u64 c1lo, c1hi;
+    asm volatile("v_mad_u64_u32 %0, %1, %2, %3, %4" : "=v"(c1lo), "=v"(c1hi) : "v"(a1), "v"(b0), "v"(c0lo));
+
+    // high = a1*b1 + c0hi + c1hi
+    u64 hcarry = c0hi + c1hi;
+    u64 hlo, hhi;
+    asm volatile("v_mad_u64_u32 %0, %1, %2, %3, %4" : "=v"(hlo), "=v"(hhi) : "v"(a1), "v"(b1), "v"(hcarry));
+
+    // Reconstruct 128-bit product:
+    // bits[0..31]  = p0lo
+    // bits[32..63] = c1lo
+    // bits[64..95] = hlo
+    // bits[96..127]= hhi
+    __uint128_t prod = (__uint128_t)p0lo
+                     + ((__uint128_t)c1lo << 32)
+                     + ((__uint128_t)hlo  << 64)
+                     + ((__uint128_t)hhi  << 96);
     return gf_red(prod);
 }
 __device__ __forceinline__ u64 gf_x7(u64 x){
