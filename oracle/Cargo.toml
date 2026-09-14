@@ -1,0 +1,7 @@
+[package]
+name = "oracle"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+qp-poseidon-core = { path = "../../qp-poseidon" }
