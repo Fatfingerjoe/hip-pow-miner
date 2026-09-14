@@ -1,6 +1,6 @@
 #include <hip/hip_runtime.h>
 #include <cstdio>
-#include <cstdint.h>
+#include <cstdint>
 #include <cstring>
 #include <cstdlib>
 #include <chrono>
