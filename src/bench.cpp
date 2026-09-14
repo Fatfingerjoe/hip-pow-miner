@@ -87,16 +87,12 @@ int main(int argc, char **argv) {
             total++;
             if (memcmp(ms,want,96)!=0) {
                 fail++;
-                printf("MID MISMATCH KAT #%d
-  want ",total);
-                for(int i=0;i<96;i++) printf("%02x",want[i]); printf("
-  got  ");
-                for(int i=0;i<96;i++) printf("%02x",((uint8_t*)ms)[i]); printf("
-");
+                printf("MID MISMATCH KAT #%d\n  want ",total);
+                for(int i=0;i<96;i++) printf("%02x",want[i]); printf("\n  got  ");
+                for(int i=0;i<96;i++) printf("%02x",((uint8_t*)ms)[i]); printf("\n");
             }
         }
-        printf("MID: %d/%d passed (%d failed)
-", total-fail, total, fail);
+        printf("MID: %d/%d passed (%d failed)\n", total-fail, total, fail);
         return fail?1:0;
     }
 
