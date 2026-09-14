@@ -60,28 +60,41 @@ static void hex2bytes(const char *hex, uint8_t *out, int n) {
 int main(int argc, char **argv) {
     const char *mode = argc>1 ? argv[1] : "bench";
     if (strcmp(mode, "verify")==0) {
-        char line[512];
-        uint8_t *d_h,*d_n,*d_o;
-        hipMalloc(&d_h,32); hipMalloc(&d_n,64); hipMalloc(&d_o,64);
+        struct Kat { const char *h, *n, *hash, *mid; };
+        Kat kats[] = {
+            {"0000000000000000000000000000000000000000000000000000000000000000",
+             "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+             "8e64e3d8e0f38f882e8501f9e525df0a95d2e91e9cfc32c9248d756fb07780e2f8fdca2c5a54441e6fcd8d774a5f6aae72f36d1c76bc19f691a0d4f6c607e8cc",
+             "8646d336b5a0fccd818ca5954891634549475e8bc9c928bcc469163bcdc4900be4421fafacd59087633f49b998698d664a9067e3883e76da193039e85ea14472203d2d3ee6a8eba8ef5b9ce39bcff072c16a3c8dd5680003d77c52ab5bf7cf1f"},
+            {"0101010101010101010101010101010101010101010101010101010101010101",
+             "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001",
+             "e4ef79db80b642a093d7e38e6a6daac7ec1cca7293ddbe3710b4e6781be4add0b93f7e3440626df5bb23b757436787ba8d3fd0a2652e387f8af5bd8a5cc2ce2f",
+             "788cf743676a5c85dce1d727e1189b5336e0e019f5a0bf3a806487dd9c3bf83fcb6d7300de1ab5fe7dbe191fa64fc6b795dedc7fe99861beb1a3885303f7467d891eb002a34a0f174be4cf057a87208ae9113e7dc541745ffaeda908097d00f1"},
+            {"000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+             "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001234567890abcdef",
+             "7f6c410ce62e7fc54811ad3b8b92664ac0f8b1d2cd6eb163129251146e7ee34d27794aaae1b31eaaeb98ab835bae6a2b9ac4ad6f08c95903e1423f0b865816ff",
+             "f6fc848ab2dddc18fd88d1f0ccda99fe27cfa43b8ab9947a6a505b37f02183d35f98f1d3524fb0c6d6de4efd98793e2ef3f205bd1e4d4526c0c9046201e91dd6cd2d28eef32b18dea303ecbc8e98000c3db245e7738f3acabc55f7553023863e"},
+        };
+        uint8_t *d_h,*d_n,*d_o; u64 *d_ms;
+        hipMalloc(&d_h,32); hipMalloc(&d_n,64); hipMalloc(&d_o,64); hipMalloc(&d_ms,12*sizeof(u64));
         int total=0,fail=0;
-        while (fgets(line,sizeof(line),stdin)) {
-            char hh[65],nh[129],gh[129];
-            if (sscanf(line, "%64s %128s %128s", hh,nh,gh)!=3) continue;
+        for (int ki=0; ki<(int)(sizeof(kats)/sizeof(kats[0])); ki++) {
+            const Kat &k = kats[ki];
             uint8_t hb[32],nb[64],want[64],got[64];
-            hex2bytes(hh,hb,32); hex2bytes(nh,nb,64); hex2bytes(gh,want,64);
+            hex2bytes(k.h,hb,32); hex2bytes(k.n,nb,64); hex2bytes(k.hash,want,64);
             hipMemcpy(d_h,hb,32,hipMemcpyHostToDevice);
-            hipMemcpy(d_n,nb,64,hipMemcpyHostToDevice);
-            verify_kernel<<<1,1>>>((const u64 *)d_h, d_n, 0, d_o);
+            hipMemcpy(d_n,nb,32,hipMemcpyHostToDevice);
+            midstate_kernel<<<1,1>>>(d_h, d_n, d_ms);
+            hipDeviceSynchronize();
+            verify_kernel<<<1,1>>>(d_ms, d_n+32, 0, d_o);
             hipDeviceSynchronize();
             hipMemcpy(got,d_o,64,hipMemcpyDeviceToHost);
             total++;
             if (memcmp(got,want,64)!=0) {
                 fail++;
-                if (fail<=3) {
-                    printf("MISMATCH #%d\n  want ",total);
-                    for(int i=0;i<32;i++) printf("%02x",want[i]); printf("...\n  got  ");
-                    for(int i=0;i<32;i++) printf("%02x",got[i]); printf("...\n");
-                }
+                printf("MISMATCH KAT #%d\n  want ",total);
+                for(int i=0;i<64;i++) printf("%02x",want[i]); printf("\n  got  ");
+                for(int i=0;i<64;i++) printf("%02x",got[i]); printf("\n");
             }
         }
         printf("VERIFY: %d/%d passed (%d failed)\n", total-fail, total, fail);
