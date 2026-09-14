@@ -15,6 +15,7 @@ static __device__ __forceinline__ u64 bswap64(u64 x) {
     return ((u64)__builtin_bswap32(lo) << 32) | (u64)__builtin_bswap32(hi);
 }
 
+// Build 8 LE-u32 felts from the 32-byte big-endian low-nonce. L[0..3] = 4 BE-u64 limbs.
 static __device__ __forceinline__ void felts_from_low(const u64 L[4], u64 idx, u64 f[8]) {
     u64 l3 = L[3] + idx; u64 c = (l3 < L[3]) ? 1u : 0u;
     u64 l2 = L[2] + c;   c = (l2 < L[2]) ? 1u : 0u;
@@ -40,6 +41,7 @@ static __device__ __forceinline__ int cmp256(const u64 *st, const uint8_t *targe
     return 0;
 }
 
+// Midstate after header + nonce_high (2 permutations), canonical.
 static __device__ __forceinline__ void compute_midstate(const uint8_t *header, const uint8_t *nonce_high, u64 *ms) {
     #pragma unroll
     for (int i=0;i<12;i++) ms[i] = 0;
@@ -66,9 +68,12 @@ static __device__ __forceinline__ void hash_from_mid(const u64 *ms, const u64 *f
     u64 s[12];
     #pragma unroll
     for (int i=0;i<12;i++) s[i] = ms[i];
+    // perm 3: absorb 8 low-nonce felts
     #pragma unroll
     for (int i=0;i<8;i++) s[i] = gf_addL(s[i], f[i]);
     permute(s);
+
+    // perm 4: absorb [1,1], then squeeze
     s[0] = gf_addL(s[0], 1);
     s[1] = gf_addL(s[1], 1);
     permute(s);
@@ -81,6 +86,8 @@ static __device__ __forceinline__ void hash_from_mid(const u64 *ms, const u64 *f
             for (int j=0;j<8;j++) out64[i*8+j] = (uint8_t)(v >> (8*j));
         }
     }
+
+    // perm 5: second squeeze
     permute(s);
     if (want_full) {
         #pragma unroll
@@ -91,6 +98,8 @@ static __device__ __forceinline__ void hash_from_mid(const u64 *ms, const u64 *f
         }
     }
 }
+
+// Direct full hash for verify/oracle comparison (no midstate shortcut).
 static __device__ __forceinline__ void hash_from_nonce(const uint8_t *header, const uint8_t *nonce, uint8_t *out64) {
     u64 s[12];
     #pragma unroll
@@ -110,7 +119,7 @@ static __device__ __forceinline__ void hash_from_nonce(const uint8_t *header, co
     }
     permute(s);
     #pragma unroll
-    for(int i=0;i<6;i++){
+    for(int i=0;i<8;i++){
         int b=32+i*4;
         u64 f=(u64)nonce[b]|((u64)nonce[b+1]<<8)|((u64)nonce[b+2]<<16)|((u64)nonce[b+3]<<24);
         s[i]=gf_addL(s[i],f);
