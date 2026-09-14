@@ -59,6 +59,30 @@ static void hex2bytes(const char *hex, uint8_t *out, int n) {
 
 int main(int argc, char **argv) {
     const char *mode = argc>1 ? argv[1] : "bench";
+    if (strcmp(mode, "perm0")==0) {
+        u64 zero[12]={0};
+        u64 *d_z,*d_o;
+        hipMalloc(&d_z,12*sizeof(u64)); hipMalloc(&d_o,12*sizeof(u64));
+        hipMemcpy(d_z,zero,12*sizeof(u64),hipMemcpyHostToDevice);
+        __global__ void pkernel(const u64 *in, u64 *out){ if(threadIdx.x||blockIdx.x)return; u64 s[12]; for(int i=0;i<12;i++) s[i]=in[i]; permute(s); for(int i=0;i<12;i++) out[i]=gf_canon(s[i]); }
+        pkernel<<<1,1>>>(d_z,d_o);
+        hipDeviceSynchronize();
+        u64 got[12];
+        hipMemcpy(got,d_o,12*sizeof(u64),hipMemcpyDeviceToHost);
+        u64 want[12]={
+            0xc9bc9432e1686884,0x03ecbab0dcdd2189,0x5e7ac885b3dc1215,
+            0x6ac07513801d191f,0xca5c593fb184dcfc,0x414dec5f3e455287,
+            0x1a17df170127ae41,0xe7e592bd0af9b0a5,0xc71a9b27edc66a4c,
+            0x2728671759ac43c2,0xb9969c20f7f672f9,0xc5140b586823b92f
+        };
+        int fail=0;
+        for(int i=0;i<12;i++) {
+            if(got[i]!=want[i]) { fail++; printf("perm0[%d] want %016lx got %016lx\n",i,want[i],got[i]); }
+        }
+        printf("PERM0: %d mismatches\n",fail);
+        return fail?1:0;
+    }
+
     if (strcmp(mode, "mid")==0) {
         struct Kat { const char *h, *n, *mid; };
         Kat kats[] = {
