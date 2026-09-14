@@ -21,17 +21,17 @@ __device__ __constant__ u64 D_TERM_EXT_RC[4][12];
 
 
 // 128-bit -> Goldilocks. Uses 2^64 = 2^32-1 and 2^96 = -1 (mod p).
+// Variant 1: use explicit carry out of t+b instead of unsigned compare for the high fold.
 __device__ __forceinline__ u64 gf_red(__uint128_t x){
     u64 lo=(u64)x, hi=(u64)(x>>64);
     u32 hh=(u32)(hi>>32), hl=(u32)hi;
     u64 t = lo - (u64)hh;
     if (lo < (u64)hh) t -= 0xFFFFFFFFULL;
     u64 b = ((u64)hl<<32) - (u64)hl;
-    u64 r = t + b;
-    if (r < t) r += 0xFFFFFFFFULL;
+    __uint128_t r128 = (__uint128_t)t + (__uint128_t)b;
+    u64 r = (u64)r128;
+    if ((u64)(r128>>64)) r += 0xFFFFFFFFULL;   // 2^64 carry fold
     // NOTE: output is congruent mod P but NOT canonical (validated in ft2.cpp).
-    // Safe: every consumer either accumulates in u128 (exact for any u64) or does one
-    // conditional subtract, and 2^64-P = 2^32-1 < P so one subtract always suffices.
     return r;
 }
 __device__ __forceinline__ u64 gf_add(u64 a, u64 b){ return gf_red((__uint128_t)a + (__uint128_t)b); }
