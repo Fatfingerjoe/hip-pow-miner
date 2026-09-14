@@ -27,6 +27,19 @@ __global__ void mul_kernel(u64 *out) {
     for (int i=0;i<4;i++) out[i]=gf_mul(a[i],b[i]);
 }
 
+__global__ void step_kernel(u64 *state_out) {
+    if (threadIdx.x || blockIdx.x) return;
+    u64 s[12]={0};
+    external_linear(s, nullptr);
+    for(int i=0;i<12;i++) state_out[i]=gf_canon(s[i]);
+    // first external round
+    for(int i=0;i<12;i++) s[i]=gf_addL(s[i], INIT_EXT_RC[0][i]);
+    for(int i=0;i<12;i++) s[i]=gf_exp7(s[i]);
+    for(int i=0;i<12;i++) state_out[12+i]=gf_canon(s[i]);
+    external_linear(s, nullptr);
+    for(int i=0;i<12;i++) state_out[24+i]=gf_canon(s[i]);
+}
+
 __global__ void midstate_kernel(const uint8_t *header, const uint8_t *nonce_high, u64 *out_ms) {
     if (threadIdx.x || blockIdx.x) return;
     compute_midstate(header, nonce_high, out_ms);
@@ -80,6 +93,26 @@ static void hex2bytes(const char *hex, uint8_t *out, int n) {
 
 int main(int argc, char **argv) {
     const char *mode = argc>1 ? argv[1] : "bench";
+    if (strcmp(mode, "step")==0) {
+        u64 *d_o, got[36];
+        hipMalloc(&d_o,36*sizeof(u64));
+        step_kernel<<<1,1>>>(d_o);
+        hipDeviceSynchronize();
+        hipMemcpy(got,d_o,36*sizeof(u64),hipMemcpyDeviceToHost);
+        u64 want_after_sbox[12]={
+            0x4f6f5c9d4d6b5a65ULL,0xaf9c9c9d4d8f8b59ULL,0x4f8b9c9d4d7a6b48ULL,
+            0x1f6a9c9d4d596b37ULL,0x19699c9d4d586b36ULL,0x4f7a9c9d4d696b47ULL,
+            0xaf9d9c9d4d8f8b5aULL,0xcf8e9c9d4d7e6b49ULL,0x2f5d9c9d4d4d6b18ULL,
+            0xefad9c9d4d9d6b68ULL,0x4f6e9c9d4d6a6b44ULL,0xaf8f9c9d4d8a6b54ULL
+        };
+        // placeholder, fill after run
+        for(int i=0;i<36;i++) {
+            if(i%12==0) printf("-- step %d --\n", i/12);
+            printf("[%2d] %016lx\n", i%12, got[i]);
+        }
+        return 0;
+    }
+
     if (strcmp(mode, "mul")==0) {
         u64 *d_o, got[4];
         hipMalloc(&d_o,4*sizeof(u64));
