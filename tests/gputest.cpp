@@ -56,12 +56,33 @@ __host__ __device__ static void mat4_safeC(u64*x){
   for(int i=0;i<4;i++)x[i]=o[i];
 }
 
-__global__ void k(const u64* in, u64* outB, u64* outU, u64* outA, u64* outB2, u64* outC, int n){
+
+// Variant D: build S using only u64 additions with explicit carries, then u128 combine.
+__host__ __device__ static void mat4_safeD(u64*x){
+  u64 s01 = x[0] + x[1];
+  u64 c01 = (s01 < x[0]) ? 1ULL : 0ULL;
+  u64 s23 = x[2] + x[3];
+  u64 c23 = (s23 < x[2]) ? 1ULL : 0ULL;
+  u64 slo = s01 + s23;
+  u64 chi = c01 + c23 + ((slo < s01) ? 1ULL : 0ULL);
+  u128 S = (u128)chi + (u128)slo;
+  u64 o[4];
+  for(int i=0;i<4;i++){
+    u128 t=(u128)x[(i+1)&3];
+    u128 Y = S + (u128)x[i];
+    Y += t;
+    Y += t;
+    o[i]=rd(Y);
+  }
+  for(int i=0;i<4;i++)x[i]=o[i];
+}
+
+__global__ void k(const u64* in, u64* outB, u64* outU, u64* outA, u64* outB2, u64* outC, u64* outD, int n){
   int t=blockIdx.x*blockDim.x+threadIdx.x; if(t>=n) return;
-  u64 a[4],b[4],sa[4],sb[4],sc[4];
-  for(int i=0;i<4;i++){a[i]=b[i]=sa[i]=sb[i]=sc[i]=in[4*t+i];}
-  mat4_base(a); mat4_u128(b); mat4_safeA(sa); mat4_safeB(sb); mat4_safeC(sc);
-  for(int i=0;i<4;i++){outB[4*t+i]=a[i]; outU[4*t+i]=b[i]; outA[4*t+i]=sa[i]; outB2[4*t+i]=sb[i]; outC[4*t+i]=sc[i];}
+  u64 a[4],b[4],sa[4],sb[4],sc[4],sd[4];
+  for(int i=0;i<4;i++){a[i]=b[i]=sa[i]=sb[i]=sc[i]=sd[i]=in[4*t+i];}
+  mat4_base(a); mat4_u128(b); mat4_safeA(sa); mat4_safeB(sb); mat4_safeC(sc); mat4_safeD(sd); mat4_safeD(sd);
+  for(int i=0;i<4;i++){outB[4*t+i]=a[i]; outU[4*t+i]=b[i]; outA[4*t+i]=sa[i]; outB2[4*t+i]=sb[i]; outC[4*t+i]=sc[i]; outD[4*t+i]=sd[i];}
 }
 int main(){
   const int N=6;
@@ -69,22 +90,23 @@ int main(){
               0x8000000000000000ULL,0x9000000000000000ULL,0xA000000000000000ULL,0xB000000000000000ULL,
               P-1,P-1,P-1,P-1,  0xDEADBEEFCAFEBABEULL,0x1234567890ABCDEFULL,P+7,0xFFFFFFFF00000000ULL};
   // CPU reference
-  u64 cB[N*4], cU[N*4], cA[N*4], cB2[N*4], cC[N*4];
-  for(int t=0;t<N;t++){u64 a[4],b[4],sa[4],sb[4],sc[4];
-    for(int i=0;i<4;i++){a[i]=b[i]=sa[i]=sb[i]=sc[i]=h[4*t+i];}
-    mat4_base(a); mat4_u128(b); mat4_safeA(sa); mat4_safeB(sb); mat4_safeC(sc);
-    for(int i=0;i<4;i++){cB[4*t+i]=a[i]; cU[4*t+i]=b[i]; cA[4*t+i]=sa[i]; cB2[4*t+i]=sb[i]; cC[4*t+i]=sc[i];}}
-  u64 *d,*oB,*oU,*oA,*oB2,*oC;
-  hipMalloc(&d,sizeof h); hipMalloc(&oB,sizeof h); hipMalloc(&oU,sizeof h); hipMalloc(&oA,sizeof h); hipMalloc(&oB2,sizeof h); hipMalloc(&oC,sizeof h);
+  u64 cB[N*4], cU[N*4], cA[N*4], cB2[N*4], cC[N*4], cD[N*4];
+  for(int t=0;t<N;t++){u64 a[4],b[4],sa[4],sb[4],sc[4],sd[4];
+    for(int i=0;i<4;i++){a[i]=b[i]=sa[i]=sb[i]=sc[i]=sd[i]=h[4*t+i];}
+    mat4_base(a); mat4_u128(b); mat4_safeA(sa); mat4_safeB(sb); mat4_safeC(sc); mat4_safeD(sd); mat4_safeD(sd);
+    for(int i=0;i<4;i++){cB[4*t+i]=a[i]; cU[4*t+i]=b[i]; cA[4*t+i]=sa[i]; cB2[4*t+i]=sb[i]; cC[4*t+i]=sc[i]; cD[4*t+i]=sd[i];}}
+  u64 *d,*oB,*oU,*oA,*oB2,*oC,*oD;
+  hipMalloc(&d,sizeof h); hipMalloc(&oB,sizeof h); hipMalloc(&oU,sizeof h); hipMalloc(&oA,sizeof h); hipMalloc(&oB2,sizeof h); hipMalloc(&oC,sizeof h); hipMalloc(&oD,sizeof h);
   hipMemcpy(d,h,sizeof h,hipMemcpyHostToDevice);
-  hipLaunchKernelGGL(k,dim3(1),dim3(N),0,0,d,oB,oU,oA,oB2,oC,N);
+  hipLaunchKernelGGL(k,dim3(1),dim3(N),0,0,d,oB,oU,oA,oB2,oC,oD,N);
   hipDeviceSynchronize();
-  u64 gB[N*4],gU[N*4],gA[N*4],gB2[N*4],gC[N*4];
+  u64 gB[N*4],gU[N*4],gA[N*4],gB2[N*4],gC[N*4],gD[N*4];
   hipMemcpy(gB,oB,sizeof h,hipMemcpyDeviceToHost);
   hipMemcpy(gU,oU,sizeof h,hipMemcpyDeviceToHost);
   hipMemcpy(gA,oA,sizeof h,hipMemcpyDeviceToHost);
   hipMemcpy(gB2,oB2,sizeof h,hipMemcpyDeviceToHost);
   hipMemcpy(gC,oC,sizeof h,hipMemcpyDeviceToHost);
+  hipMemcpy(gD,oD,sizeof h,hipMemcpyDeviceToHost);
   int bad=0;
   for(int t=0;t<N;t++)for(int i=0;i<4;i++){
     int k4=4*t+i;
@@ -93,6 +115,7 @@ int main(){
     if(gA[k4]!=cA[k4]){printf("case %d lane %d SAFEA cpu=%016llx gpu=%016llx  *** GPU DIFFERS ***\n",t,i,cA[k4],gA[k4]);bad++;}
     if(gB2[k4]!=cB2[k4]){printf("case %d lane %d SAFEB cpu=%016llx gpu=%016llx  *** GPU DIFFERS ***\n",t,i,cB2[k4],gB2[k4]);bad++;}
     if(gC[k4]!=cC[k4]){printf("case %d lane %d SAFEC cpu=%016llx gpu=%016llx  *** GPU DIFFERS ***\n",t,i,cC[k4],gC[k4]);bad++;}
+    if(gD[k4]!=cD[k4]){printf("case %d lane %d SAFED cpu=%016llx gpu=%016llx  *** GPU DIFFERS ***\n",t,i,cD[k4],gD[k4]);bad++;}
     if(cB[k4]!=cU[k4]){printf("case %d lane %d CPU base!=u128 %016llx vs %016llx\n",t,i,cB[k4],cU[k4]);bad++;}
   }
   printf("%s\n", bad? "MISMATCHES FOUND":"GPU and CPU agree on ALL forms, and the forms agree");
