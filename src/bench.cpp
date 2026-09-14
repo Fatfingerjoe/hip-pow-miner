@@ -67,14 +67,6 @@ static void hex2bytes(const char *hex, uint8_t *out, int n) {
 
 int main(int argc, char **argv) {
     const char *mode = argc>1 ? argv[1] : "bench";
-__global__ void perm0_kernel(const u64 *in, u64 *out) {
-    if (threadIdx.x || blockIdx.x) return;
-    u64 s[12];
-    for (int i=0;i<12;i++) s[i]=in[i];
-    permute(s);
-    for (int i=0;i<12;i++) out[i]=gf_canon(s[i]);
-}
-
     if (strcmp(mode, "perm0")==0) {
         u64 zero[12]={0};
         u64 *d_z,*d_o, got[12];
