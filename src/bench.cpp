@@ -6,6 +6,14 @@
 #include <chrono>
 #include "miner.h"
 
+__global__ void perm0_kernel(const u64 *in, u64 *out) {
+    if (threadIdx.x || blockIdx.x) return;
+    u64 s[12];
+    for (int i=0;i<12;i++) s[i]=in[i];
+    permute(s);
+    for (int i=0;i<12;i++) out[i]=gf_canon(s[i]);
+}
+
 __global__ void midstate_kernel(const uint8_t *header, const uint8_t *nonce_high, u64 *out_ms) {
     if (threadIdx.x || blockIdx.x) return;
     compute_midstate(header, nonce_high, out_ms);
