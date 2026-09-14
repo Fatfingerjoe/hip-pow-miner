@@ -12,8 +12,8 @@ static __host__ __device__ __forceinline__ u64 gf_canon(u64 x) {
 }
 static __host__ __device__ __forceinline__ u64 gf_addL(u64 a, u64 b) {
     u64 r = a + b;
-    if (r < a || r >= GOLDI_P) r -= GOLDI_P;
-    return r;
+    if (r < a) r += EPS;          // 2^64 ≡ EPS = 2^32-1 (mod P)
+    return r;                       // may be non-canonical, in [0, 2^64)
 }
 static __host__ __device__ __forceinline__ u64 eps_mul32(u32 x) {
     return ((u64)x << 32) - (u64)x;
@@ -30,12 +30,11 @@ static __device__ __forceinline__ void mul128(u64 a, u64 b, u64 &lo, u64 &hi) {
 static __device__ __forceinline__ u64 gf_reduce128(u64 lo, u64 hi) {
     u32 hh = hi32(hi);
     u32 hl = lo32(hi);
-    u64 m = eps_mul32(hl);
-    u64 u = lo + m;
-    bool c1 = (u < lo);
-    if (c1) u = gf_addL(u, EPS);
-    u64 r = u - (u64)hh;
-    if (u < (u64)hh) r += GOLDI_P;
+    u64 t0 = lo - (u64)hh;
+    if (lo < (u64)hh) t0 -= EPS;        // borrow: subtract NEG_ORDER
+    u64 t1 = eps_mul32(hl);              // hl * EPS
+    u64 r = t1 + t0;
+    if (r < t1) r += EPS;                // carry into high word
     return r;
 }
 static __device__ __forceinline__ u64 gf_mul(u64 a, u64 b) {
