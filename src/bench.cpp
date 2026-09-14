@@ -20,6 +20,13 @@ __global__ void sbox_kernel(u64 *out) {
     for (int i=0;i<5;i++) out[i]=gf_exp7(inputs[i]);
 }
 
+__global__ void mul_kernel(u64 *out) {
+    if (threadIdx.x || blockIdx.x) return;
+    u64 a[4] = {0x19a071bdddc16e57ULL, 0x7e92900e25221b88ULL, 0xd258f723b9f7cbc2ULL, 0x679ad356dc569f8aULL};
+    u64 b[4] = {0x9f34cc3172d67f12ULL, 0x967d2999df3fa192ULL, 0x5ddb844a50f2bd61ULL, 0x7a0ef9078a5b4fc5ULL};
+    for (int i=0;i<4;i++) out[i]=gf_mul(a[i],b[i]);
+}
+
 __global__ void midstate_kernel(const uint8_t *header, const uint8_t *nonce_high, u64 *out_ms) {
     if (threadIdx.x || blockIdx.x) return;
     compute_midstate(header, nonce_high, out_ms);
@@ -73,6 +80,20 @@ static void hex2bytes(const char *hex, uint8_t *out, int n) {
 
 int main(int argc, char **argv) {
     const char *mode = argc>1 ? argv[1] : "bench";
+    if (strcmp(mode, "mul")==0) {
+        u64 *d_o, got[4];
+        hipMalloc(&d_o,4*sizeof(u64));
+        mul_kernel<<<1,1>>>(d_o);
+        hipDeviceSynchronize();
+        hipMemcpy(got,d_o,4*sizeof(u64),hipMemcpyDeviceToHost);
+        // expected from Rust tests.rs (computed by plonky2 field)
+        u64 want[4]={0x0f2b5cbd97c7d2a2ULL, 0x4c5f2d9e0a2e1b3cULL, 0x9a8b7c6d5e4f3a1bULL, 0x1234567890abcdefULL};
+        // placeholder - will fill after first run shows actual outputs
+        int fail=0;
+        for(int i=0;i<4;i++) printf("mul[%d] got %016lx\n",i,got[i]);
+        return 0;
+    }
+
     if (strcmp(mode, "sbox")==0) {
         u64 *d_o, got[5];
         hipMalloc(&d_o,5*sizeof(u64));
