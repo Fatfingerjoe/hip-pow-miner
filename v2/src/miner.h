@@ -91,3 +91,44 @@ static __device__ __forceinline__ void hash_from_mid(const u64 *ms, const u64 *f
         }
     }
 }
+static __device__ __forceinline__ void hash_from_nonce(const uint8_t *header, const uint8_t *nonce, uint8_t *out64) {
+    u64 s[12];
+    #pragma unroll
+    for(int i=0;i<12;i++) s[i]=0;
+    #pragma unroll
+    for(int i=0;i<8;i++){
+        int b=i*4;
+        u64 f=(u64)header[b]|((u64)header[b+1]<<8)|((u64)header[b+2]<<16)|((u64)header[b+3]<<24);
+        s[i]=gf_addL(s[i],f);
+    }
+    permute(s);
+    #pragma unroll
+    for(int i=0;i<8;i++){
+        int b=i*4;
+        u64 f=(u64)nonce[b]|((u64)nonce[b+1]<<8)|((u64)nonce[b+2]<<16)|((u64)nonce[b+3]<<24);
+        s[i]=gf_addL(s[i],f);
+    }
+    permute(s);
+    #pragma unroll
+    for(int i=0;i<6;i++){
+        int b=32+i*4;
+        u64 f=(u64)nonce[b]|((u64)nonce[b+1]<<8)|((u64)nonce[b+2]<<16)|((u64)nonce[b+3]<<24);
+        s[i]=gf_addL(s[i],f);
+    }
+    permute(s);
+    s[0]=gf_addL(s[0],1); s[1]=gf_addL(s[1],1);
+    permute(s);
+    #pragma unroll
+    for(int i=0;i<4;i++){
+        u64 v=gf_canon(s[i]);
+        #pragma unroll
+        for(int j=0;j<8;j++) out64[i*8+j]=(uint8_t)(v>>(8*j));
+    }
+    permute(s);
+    #pragma unroll
+    for(int i=0;i<4;i++){
+        u64 v=gf_canon(s[i]);
+        #pragma unroll
+        for(int j=0;j<8;j++) out64[32+i*8+j]=(uint8_t)(v>>(8*j));
+    }
+}

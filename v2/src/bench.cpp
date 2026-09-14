@@ -6,6 +6,11 @@
 #include <chrono>
 #include "miner.h"
 
+__global__ void direct_hash_kernel(const uint8_t *header, const uint8_t *nonce, uint8_t *out) {
+    if (threadIdx.x || blockIdx.x) return;
+    hash_from_nonce(header, nonce, out);
+}
+
 __global__ void midstate_kernel(const uint8_t *header, const uint8_t *nonce_high, u64 *out_ms) {
     if (threadIdx.x || blockIdx.x) return;
     compute_midstate(header, nonce_high, out_ms);
@@ -67,6 +72,30 @@ static const KatFull KATS[] = {
      "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001234567890abcdef",
      "7f6c410ce62e7fc54811ad3b8b92664ac0f8b1d2cd6eb163129251146e7ee34d27794aaae1b31eaaeb98ab835bae6a2b9ac4ad6f08c95903e1423f0b865816ff"},
 };
+
+static int do_direct_verify() {
+    uint8_t *d_h,*d_n,*d_o;
+    hipMalloc(&d_h,32); hipMalloc(&d_n,64); hipMalloc(&d_o,64);
+    int total=sizeof(KATS)/sizeof(KATS[0]), fail=0;
+    for(int ki=0;ki<total;ki++){
+        const KatFull &k=KATS[ki];
+        uint8_t hb[32],nb[64],want[64],got[64];
+        hex2bytes(k.h,hb,32); hex2bytes(k.n,nb,64); hex2bytes(k.hash,want,64);
+        hipMemcpy(d_h,hb,32,hipMemcpyHostToDevice);
+        hipMemcpy(d_n,nb,64,hipMemcpyHostToDevice);
+        direct_hash_kernel<<<1,1>>>(d_h,d_n,d_o);
+        hipDeviceSynchronize();
+        hipMemcpy(got,d_o,64,hipMemcpyDeviceToHost);
+        if(memcmp(got,want,64)!=0){
+            fail++;
+            printf("DIRECT KAT #%d mismatch\n  want ",ki);
+            for(int i=0;i<64;i++) printf("%02x",want[i]); printf("\n  got  ");
+            for(int i=0;i<64;i++) printf("%02x",got[i]); printf("\n");
+        }
+    }
+    printf("DIRECT: %d/%d passed\n",total-fail,total);
+    return fail?1:0;
+}
 
 static int do_verify() {
     uint8_t *d_h,*d_n,*d_o; u64 *d_ms;
@@ -140,6 +169,7 @@ static int do_bench(int argc, char **argv) {
 
 int main(int argc, char **argv) {
     const char *mode = argc>1 ? argv[1] : "bench";
+    if (strcmp(mode,"direct")==0) return do_direct_verify();
     if (strcmp(mode,"verify")==0) return do_verify();
     return do_bench(argc, argv);
 }
