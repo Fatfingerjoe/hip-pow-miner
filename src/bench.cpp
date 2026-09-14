@@ -13,7 +13,8 @@ __global__ void midstate_kernel(const uint8_t *header, const uint8_t *nonce_high
 
 __global__ void mine_kernel(const u64 *ms, const uint8_t *low_base, const uint8_t *target,
                             unsigned long long nonce0, unsigned per_thread,
-                            unsigned long long *work_counter) {
+                            unsigned long long *work_counter,
+                            unsigned char *out_rej) {
     unsigned long long tid = (unsigned long long)blockIdx.x * blockDim.x + threadIdx.x;
     unsigned long long start = nonce0 + tid * per_thread;
     u64 L[4];
@@ -23,18 +24,18 @@ __global__ void mine_kernel(const u64 *ms, const uint8_t *low_base, const uint8_
         L[i] = ((u64)low_base[b]<<56)|((u64)low_base[b+1]<<48)|((u64)low_base[b+2]<<40)|((u64)low_base[b+3]<<32)|
                ((u64)low_base[b+4]<<24)|((u64)low_base[b+5]<<16)|((u64)low_base[b+6]<<8)|(u64)low_base[b+7];
     }
-    int acc = 0;
+    unsigned char acc = 0;
     #pragma unroll 1
     for (unsigned k=0;k<per_thread;k++) {
         u64 f[8];
         felts_from_low(L, start + k, f);
         int rej;
         hash_from_mid(ms, f, target, &rej, 0, nullptr);
-        acc += rej;
+        acc ^= (unsigned char)(rej ^ k);
     }
-    if ((threadIdx.x & (warpSize-1)) == 0) atomicAdd(work_counter, (unsigned long long)per_thread);
-    // ensure acc is live (anti-dead-code elimination)
-    if (acc < 0) printf("impossible\n");
+    // global side effects: work counter + checksum
+    if (out_rej) out_rej[tid % (256*384)] = acc;
+    atomicAdd(work_counter, (unsigned long long)per_thread);
 }
 
 __global__ void verify_kernel(const u64 *ms, const uint8_t *low_base, unsigned idx, uint8_t *out64) {
@@ -108,10 +109,13 @@ int main(int argc, char **argv) {
     unsigned long long nonces_per_launch = (unsigned long long)blocks*tpb*per_thread;
 
     unsigned long long *d_work;
+    unsigned char *d_rej;
     hipMalloc(&d_work, sizeof(unsigned long long));
+    hipMalloc(&d_rej, 256*384);
 
     hipMemset(d_work, 0, sizeof(unsigned long long));
-    mine_kernel<<<blocks,tpb>>>(d_ms,d_low,d_t,0,per_thread,d_work);
+    hipMemset(d_rej, 0, 256*384);
+    mine_kernel<<<blocks,tpb>>>(d_ms,d_low,d_t,0,per_thread,d_work,d_rej);
     hipError_t err = hipGetLastError();
     hipDeviceSynchronize();
     if (err != hipSuccess) {
@@ -124,7 +128,8 @@ int main(int argc, char **argv) {
     unsigned long long total_work=0; int launches=0; double elapsed=0;
     while (elapsed < secs) {
         hipMemset(d_work, 0, sizeof(unsigned long long));
-        mine_kernel<<<blocks,tpb>>>(d_ms,d_low,d_t,total_work,per_thread,d_work);
+        hipMemset(d_rej, 0, 256*384);
+        mine_kernel<<<blocks,tpb>>>(d_ms,d_low,d_t,total_work,per_thread,d_work,d_rej);
         err = hipGetLastError();
         hipDeviceSynchronize();
         if (err != hipSuccess) {
@@ -140,5 +145,6 @@ int main(int argc, char **argv) {
     double mhs = total_work / elapsed / 1e6;
     printf("BENCH %s: %.2f MH/s (blocks=%d tpb=%d per_thread=%u, %llu nonces, %.2fs, %d launches)\n",
            prop.name, mhs, blocks, tpb, per_thread, total_work, elapsed, launches);
+    hipFree(d_h);hipFree(d_hi);hipFree(d_low);hipFree(d_t);hipFree(d_ms);hipFree(d_work);hipFree(d_rej);
     return 0;
 }
